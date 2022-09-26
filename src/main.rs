@@ -1,4 +1,4 @@
-use embedded_hal::delay::blocking::DelayUs;
+// use embedded_hal::delay::blocking::DelayUs;
 
 use esp_idf_hal::delay::FreeRtos;
 use esp_idf_hal::ledc::*;
@@ -10,26 +10,25 @@ fn main() -> anyhow::Result<()> {
 
     println!("Configuring output channel");
 
-    // let peripherals = Peripherals::take().unwrap();
-    // let config = config::TimerConfig::new().frequency(25.kHz().into());
-    // let mut channel = LedcDriver::new(
-    //     peripherals.ledc.channel0,
-    //     LedcTimerDriver::new(peripherals.ledc.timer0, &config)?,
-    //     peripherals.pins.gpio4,
-    //     &config,
-    // )?;
+    let peripherals = Peripherals::take().unwrap();
+    let config = config::TimerConfig::new().frequency(2.kHz().into());
+    let mut channel = LedcDriver::new(
+        peripherals.ledc.channel0,
+        LedcTimerDriver::new(peripherals.ledc.timer0, &config)?,
+        peripherals.pins.gpio4,
+        &config,
+    )?;
 
-    // println!("Starting duty-cycle loop");
+    println!("Starting duty-cycle loop");
 
-    // let max_duty = channel.get_max_duty();
-    // for numerator in [0, 1, 2, 3, 4, 5].iter().cycle() {
-    //     println!("Duty {}/5", numerator);
-    //     channel.set_duty(max_duty * numerator / 5)?;
-    //     FreeRtos::delay_ms(2000);
-    // }
+    let max_duty = channel.get_max_duty();
+    for numerator in (1..=10).into_iter().cycle() {
+        println!("Duty {}/10", numerator);
+        channel.set_duty(max_duty * numerator / 10)?;
+        FreeRtos::delay_ms(2000);
+    }
 
-    // loop {
-    //     FreeRtos::delay_ms(1000);
-    // }
-    Ok(())
+    loop {
+        FreeRtos::delay_ms(1000);
+    }
 }
