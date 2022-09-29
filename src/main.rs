@@ -8,7 +8,8 @@ use std::sync::Mutex;
 type ChannelA<'a> = Arc<Mutex<LedcDriver<'a, CHANNEL0, LedcTimerDriver<'a, TIMER0>>>>;
 type ChannelB<'a> = Arc<Mutex<LedcDriver<'a, CHANNEL1, LedcTimerDriver<'a, TIMER1>>>>;
 
-const PWM_HOLD_RATE: u32 = 1;
+const PWM_HOLD_RATE_LOW: u32 = 2;
+const PWM_HOLD_RATE_HIGH: u32 = 10;
 const CHANGEOVER_MS: u32 = 200;
 
 fn main() -> anyhow::Result<()> {
@@ -29,9 +30,11 @@ fn main() -> anyhow::Result<()> {
         peripherals.pins.gpio3,
         &config,
     )?));
+
     println!("Configuring input channel A GPIO 0 (active low)");
     let mut sense_a = PinDriver::input(peripherals.pins.gpio0)?;
     sense_a.set_pull(Pull::Up)?;
+
     println!("Configuring input channel B GPIO 1 (active low)");
     let mut sense_b = PinDriver::input(peripherals.pins.gpio1)?;
     sense_b.set_pull(Pull::Up)?;
@@ -40,20 +43,33 @@ fn main() -> anyhow::Result<()> {
     let led = Arc::new(Mutex::new(PinDriver::output(peripherals.pins.gpio7)?));
     // led.set_low()?;
 
+    println!("Configuring input PWM sense (active high)");
+    let mut pwm_sense = PinDriver::input(peripherals.pins.gpio4)?;
+    pwm_sense.set_pull(Pull::Down)?;
+
+    println!("Configuring input PWM sense (active low)");
+    let mut pwm_signal = PinDriver::output(peripherals.pins.gpio5)?;
+    pwm_signal.set_high()?;
+
     println!("Starting contactor control loop");
     let mut state_a = false;
     let mut state_b = false;
+
     loop {
         let led_a = led.clone();
         let led_thread = std::thread::spawn(move || update_led(state_a, state_b, led_a));
-
         while !led_thread.is_finished() {
+            let pwm_hold_rate = if pwm_sense.is_low() {
+                PWM_HOLD_RATE_LOW
+            } else {
+                PWM_HOLD_RATE_HIGH
+            };
             FreeRtos::delay_ms(200);
             if sense_a.is_low() && !state_a {
                 println!("State A: Debounce 100ms started");
                 FreeRtos::delay_ms(100);
                 if sense_a.is_low() {
-                    activate_contactor_a(channel_a.clone())?;
+                    activate_contactor_a(channel_a.clone(), pwm_hold_rate)?;
                     state_a = true;
                 }
 
@@ -72,7 +88,7 @@ fn main() -> anyhow::Result<()> {
                 println!("State B: Debounce 100ms started");
                 FreeRtos::delay_ms(100);
                 if sense_b.is_low() {
-                    activate_contactor_b(channel_b.clone())?;
+                    activate_contactor_b(channel_b.clone(), pwm_hold_rate)?;
                     state_b = true;
                 }
 
@@ -112,26 +128,26 @@ fn deactivate_contactor_b(channel_b: ChannelB) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn activate_contactor_a(channel_a: ChannelA) -> Result<(), anyhow::Error> {
+fn activate_contactor_a(channel_a: ChannelA, pwm: u32) -> Result<(), anyhow::Error> {
     if let Ok(mut channel) = channel_a.lock() {
         let max_duty = channel.get_max_duty();
         channel.set_duty(max_duty)?;
         channel.enable()?;
         println!("Conactor A: Set duty 100%");
         FreeRtos::delay_ms(CHANGEOVER_MS);
-        return Ok(channel.set_duty(PWM_HOLD_RATE)?);
+        return Ok(channel.set_duty(pwm)?);
     };
     Err(anyhow::anyhow!("Conactor A: Failed to get mutex"))
 }
 
-fn activate_contactor_b(channel_b: ChannelB) -> Result<(), anyhow::Error> {
+fn activate_contactor_b(channel_b: ChannelB, pwm: u32) -> Result<(), anyhow::Error> {
     if let Ok(mut channel) = channel_b.lock() {
         let max_duty = channel.get_max_duty();
         channel.set_duty(max_duty)?;
         channel.enable()?;
         println!("Conactor B: Set duty 100%");
         FreeRtos::delay_ms(CHANGEOVER_MS);
-        return Ok(channel.set_duty(PWM_HOLD_RATE)?);
+        return Ok(channel.set_duty(pwm)?);
     };
     Err(anyhow::anyhow!("Conactor B: Failed to get mutex"))
 }
