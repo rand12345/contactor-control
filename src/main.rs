@@ -9,7 +9,7 @@ type ChannelA<'a> = Arc<Mutex<LedcDriver<'a, CHANNEL0, LedcTimerDriver<'a, TIMER
 type ChannelB<'a> = Arc<Mutex<LedcDriver<'a, CHANNEL1, LedcTimerDriver<'a, TIMER1>>>>;
 
 const PWM_HOLD_RATE_LOW: u32 = 2;
-const PWM_HOLD_RATE_HIGH: u32 = 10;
+// const PWM_HOLD_RATE_HIGH: u32 = 10;
 const CHANGEOVER_MS: u32 = 200;
 
 fn main() -> anyhow::Result<()> {
@@ -21,88 +21,77 @@ fn main() -> anyhow::Result<()> {
     let channel_a: ChannelA = Arc::new(Mutex::new(LedcDriver::new(
         peripherals.ledc.channel0,
         LedcTimerDriver::new(peripherals.ledc.timer0, &config)?,
-        peripherals.pins.gpio2,
+        peripherals.pins.gpio1,
         &config,
     )?));
     let channel_b: ChannelB = Arc::new(Mutex::new(LedcDriver::new(
         peripherals.ledc.channel1,
         LedcTimerDriver::new(peripherals.ledc.timer1, &config)?,
-        peripherals.pins.gpio3,
+        peripherals.pins.gpio2,
         &config,
     )?));
 
     println!("Configuring input channel A GPIO 0 (active low)");
     let mut sense_a = PinDriver::input(peripherals.pins.gpio0)?;
-    sense_a.set_pull(Pull::Up)?;
+    sense_a.set_pull(Pull::Down)?;
 
-    println!("Configuring input channel B GPIO 1 (active low)");
-    let mut sense_b = PinDriver::input(peripherals.pins.gpio1)?;
-    sense_b.set_pull(Pull::Up)?;
+    // println!("Configuring input channel B GPIO 1 (active low)");
+    // let mut sense_b = PinDriver::input(peripherals.pins.gpio1)?;
+    // sense_b.set_pull(Pull::Up)?;
 
     println!("Configuring output channel LED GPIO 7 (active high)");
     let led = Arc::new(Mutex::new(PinDriver::output(peripherals.pins.gpio7)?));
     // led.set_low()?;
 
     println!("Configuring input PWM sense (active high)");
-    let mut pwm_sense = PinDriver::input(peripherals.pins.gpio4)?;
+    let mut pwm_sense = PinDriver::input(peripherals.pins.gpio5)?;
     pwm_sense.set_pull(Pull::Down)?;
 
-    println!("Configuring input PWM sense (active low)");
-    let mut pwm_signal = PinDriver::output(peripherals.pins.gpio5)?;
-    pwm_signal.set_high()?;
+    // println!("Configuring input PWM sense (active low)");
+    // let mut pwm_signal = PinDriver::output(peripherals.pins.gpio5)?;
+    // pwm_signal.set_high()?;
 
     println!("Starting contactor control loop");
     let mut state_a = false;
-    let mut state_b = false;
+    // let mut state_b = false;
+    let mut pwm_hold_rate = 60;
 
+    // activate_contactor_a(channel_a.clone(), 255)?;
+    // FreeRtos::delay_ms(200);
+    // activate_contactor_a(channel_a.clone(), pwm_hold_rate)?;
     loop {
-        let led_a = led.clone();
-        let led_thread = std::thread::spawn(move || update_led(state_a, state_b, led_a));
-        while !led_thread.is_finished() {
-            let pwm_hold_rate = if pwm_sense.is_low() {
-                PWM_HOLD_RATE_LOW
-            } else {
-                PWM_HOLD_RATE_HIGH
-            };
-            FreeRtos::delay_ms(200);
-            if sense_a.is_low() && !state_a {
-                println!("State A: Debounce 100ms started");
-                FreeRtos::delay_ms(100);
-                if sense_a.is_low() {
-                    activate_contactor_a(channel_a.clone(), pwm_hold_rate)?;
-                    state_a = true;
-                }
-
-                // continue;
-            } else if sense_a.is_low() && state_a {
-                println!(
-                    "State A: {state_a} Output:{:?}/256",
-                    channel_a.clone().lock().unwrap().get_duty()
-                );
-            } else {
-                deactivate_contactor_a(channel_a.clone())?;
-                state_a = false;
-            }
-
-            if sense_b.is_low() && !state_b {
-                println!("State B: Debounce 100ms started");
-                FreeRtos::delay_ms(100);
-                if sense_b.is_low() {
-                    activate_contactor_b(channel_b.clone(), pwm_hold_rate)?;
-                    state_b = true;
-                }
-
-                // continue;
-            } else if sense_b.is_low() && state_b {
-                println!(
-                    "State B: {state_b} Output:{:?}/256",
-                    channel_b.clone().lock().unwrap().get_duty()
-                );
-            } else {
-                deactivate_contactor_b(channel_b.clone())?;
-                state_b = false;
-            }
+        if pwm_sense.is_high() {
+            pwm_hold_rate += 1
         }
+        led.clone().lock().unwrap().toggle().unwrap();
+        FreeRtos::delay_ms(500);
+        if sense_a.is_low() && !state_a {
+            println!("State A: Debounce 100ms started");
+            FreeRtos::delay_ms(200);
+            if sense_a.is_low() {
+                activate_contactor_a(channel_a.clone(), pwm_hold_rate)?;
+                activate_contactor_b(channel_b.clone(), pwm_hold_rate)?;
+                state_a = true;
+            }
+
+            // continue;
+        } else if sense_a.is_low() && state_a {
+            // activate_contactor_a(channel_a.clone(), pwm_hold_rate)?;
+            println!(
+                "State A: {state_a} Output:{:?}/256",
+                channel_a.clone().lock().unwrap().get_duty()
+            );
+            println!(
+                "State B: {state_a} Output:{:?}/256",
+                channel_b.clone().lock().unwrap().get_duty()
+            );
+        } else {
+            deactivate_contactor_a(channel_a.clone())?;
+            state_a = false;
+            deactivate_contactor_b(channel_b.clone())?;
+            state_a = false;
+        }
+
         // led_thread.join().unwrap()?;
     }
 }
